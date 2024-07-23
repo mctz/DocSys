@@ -4,17 +4,20 @@ import java.io.Serializable;
 
 import com.DocSystem.common.SyncLock;
 
-public class OfficeEditLock implements Serializable {
+public class SyncSourceLock implements Serializable {
+
 	/**
 	 * 
 	 */
-	private static final long serialVersionUID = -5064183009607702364L;
+	private static final long serialVersionUID = -8988973478839398727L;
+	
+	public String sourceName;	//syncSourceName
+	
+	public Integer id;			//LockId
 
-	public Integer id;
+	public Integer type;	
 
-	public Integer type;
-
-	public String name;	//lock name
+	public String name;			//lock name
 
 	public Integer state; 
 
@@ -31,4 +34,5 @@ public class OfficeEditLock implements Serializable {
 	public Long createTime;
 
 	public String info;	//lock info for debug
+
 }

@@ -121,14 +121,14 @@ public class LuceneUtil2   extends BaseFunction
 
 		String lockInfo = "LuceneUtil2 deleteIndexLib synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-    	synchronized(synclock)
-    	{
-			redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("DocIndexLib", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+		{
+			return false;
+		}
 			
-    		ret = FileUtil.delFileOrDir(indexLib);
+    	ret = FileUtil.delFileOrDir(indexLib);
     		
-    		redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
+    	unlockSyncSource(lockName, systemUser);
     	return ret;
     }
 	
@@ -176,40 +176,40 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 addIndex synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("DocIndexLib", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+		{
+			return false;
+		}
 			
-    		try {
-		    	analyzer = new IKAnalyzer();
-		    	directory = FSDirectory.open(new File(indexLib));
+		try {
+	    	analyzer = new IKAnalyzer();
+	    	directory = FSDirectory.open(new File(indexLib));
+
+	        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, analyzer);
+	        indexWriter = new IndexWriter(directory, config);
 	
-		        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, analyzer);
-		        indexWriter = new IndexWriter(directory, config);
-		
-		        Document document = buildDocument(doc, content);
-		        indexWriter.addDocument(document);
-		        
-		        indexWriter.commit();
-		        
-		        indexWriter.close();
-		        indexWriter = null;
-		        directory.close();
-		        directory = null;
-		        analyzer.close();
-		        analyzer = null;
-		        
-		        //Log.debug("addIndex() Success id:" + doc.getId() + " docId:"+ doc.getDocId() + " path:" + doc.getPath() + " name:" + doc.getName() + " indexLib:"+indexLib);	        
-		        ret = true;
-			} catch (Exception e) {				
-		        Log.debug("addIndex() 异常");
-		        Log.debug(e);
-			} finally {
-				closeResource(indexWriter, directory, analyzer);
-			}
-    		
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
+	        Document document = buildDocument(doc, content);
+	        indexWriter.addDocument(document);
+	        
+	        indexWriter.commit();
+	        
+	        indexWriter.close();
+	        indexWriter = null;
+	        directory.close();
+	        directory = null;
+	        analyzer.close();
+	        analyzer = null;
+	        
+	        //Log.debug("addIndex() Success id:" + doc.getId() + " docId:"+ doc.getDocId() + " path:" + doc.getPath() + " name:" + doc.getName() + " indexLib:"+indexLib);	        
+	        ret = true;
+		} catch (Exception e) {				
+	        Log.debug("addIndex() 异常");
+	        Log.debug(e);
+		} finally {
+			closeResource(indexWriter, directory, analyzer);
+		}
+    	
+		unlockSyncSource(lockName, systemUser);
 
 		Date date2 = new Date();
         Log.debug("创建索引耗时：" + (date2.getTime() - date1.getTime()) + "ms for [" + doc.getPath() + doc.getName() + "]\n");
@@ -427,40 +427,40 @@ public class LuceneUtil2   extends BaseFunction
     	Object synclock = getSyncLock(indexLib);
     	String lockInfo = "LuceneUtil2 updateIndex synclock:" + indexLib;
     	String lockName = "indexLibSyncLock" + indexLib;
-    	synchronized(synclock)
-    	{    		
-    		redisSyncLockEx(lockName, lockInfo);
-			
-			try {
-		        analyzer = new IKAnalyzer();
-	    		File file = new File(indexLib);
-		        directory = FSDirectory.open(file);
-		        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, analyzer);
-		        indexWriter = new IndexWriter(directory, config);
-		         
-		        Document document = buildDocument(doc, content);
-		        indexWriter.addDocument(document); 
-		        
-		        indexWriter.updateDocument(new Term("docId",doc.getDocId()+""), document);
-		        indexWriter.commit();
-		        
-		        indexWriter.close();
-		        indexWriter = null;
-		        directory.close();
-		        directory = null;
-		        analyzer.close();
-		        analyzer = null;
-		         
-		        ret =  true;			
-			} catch (IOException e) {
-				Log.debug("updateIndex() 异常");
-				Log.debug(e);
-			} finally {
-				closeResource(indexWriter, directory, analyzer);
-			}	
-			
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
+		if(false == lockSyncSource("DocIndexLib", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+		{
+			return false;
 		}
+			
+		try {
+	        analyzer = new IKAnalyzer();
+    		File file = new File(indexLib);
+	        directory = FSDirectory.open(file);
+	        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, analyzer);
+	        indexWriter = new IndexWriter(directory, config);
+	         
+	        Document document = buildDocument(doc, content);
+	        indexWriter.addDocument(document); 
+	        
+	        indexWriter.updateDocument(new Term("docId",doc.getDocId()+""), document);
+	        indexWriter.commit();
+	        
+	        indexWriter.close();
+	        indexWriter = null;
+	        directory.close();
+	        directory = null;
+	        analyzer.close();
+	        analyzer = null;
+	         
+	        ret =  true;			
+		} catch (IOException e) {
+			Log.debug("updateIndex() 异常");
+			Log.debug(e);
+		} finally {
+			closeResource(indexWriter, directory, analyzer);
+		}	
+			
+		unlockSyncSource(lockName, systemUser);
     	
         Date date2 = new Date();
         Log.debug("更新索引耗时：" + (date2.getTime() - date1.getTime()) + "ms for [" + doc.getPath() + doc.getName() + "]\n");
@@ -487,36 +487,36 @@ public class LuceneUtil2   extends BaseFunction
     	Object synclock = getSyncLock(indexLib);
     	String lockInfo = "LuceneUtil2 deleteIndex synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-    	synchronized(synclock)
-    	{
-			redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("DocIndexLib", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+		{
+			return false;
+		}
+		
+		try {
+			directory = FSDirectory.open(new File(indexLib));
+		
+	        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, null);
+	        indexWriter = new IndexWriter(directory, config);
+	        
+	        Query query =NumericRangeQuery.newLongRange("docId", doc.getDocId(), doc.getDocId(), true,true);
+	        indexWriter.deleteDocuments(query);
+	        indexWriter.commit();
+
+	        indexWriter.close();
+	        indexWriter = null;
+	        directory.close();
+	        directory = null;
+	        
+	        ret = true;
+		} catch (Exception e) {
+			Log.info("deleteIndex() 异常");
+			Log.debug(e);
+		} finally {
+			closeResource(indexWriter, directory, analyzer);					
+		}
 			
-			try {
-				directory = FSDirectory.open(new File(indexLib));
-			
-		        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, null);
-		        indexWriter = new IndexWriter(directory, config);
-		        
-		        Query query =NumericRangeQuery.newLongRange("docId", doc.getDocId(), doc.getDocId(), true,true);
-		        indexWriter.deleteDocuments(query);
-		        indexWriter.commit();
-	
-		        indexWriter.close();
-		        indexWriter = null;
-		        directory.close();
-		        directory = null;
-		        
-		        ret = true;
-			} catch (Exception e) {
-				Log.info("deleteIndex() 异常");
-				Log.debug(e);
-			} finally {
-				closeResource(indexWriter, directory, analyzer);					
-			}
-			
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
-    	
+		unlockSyncSource(lockName, systemUser);
+   	
         Date date2 = new Date();
         Log.debug("删除索引耗时：" + (date2.getTime() - date1.getTime()) + "ms for [" + doc.getPath() + doc.getName() + "]\n");
     	return ret;
@@ -547,38 +547,38 @@ public class LuceneUtil2   extends BaseFunction
 		    	Object synclock = getSyncLock(indexLib);
 	    		String lockInfo = "LuceneUtil2 deleteIndexEx synclock:" + indexLib;
 		    	String lockName = "indexLibSyncLock" + indexLib;
-		    	synchronized(synclock)
-		    	{
-					redisSyncLockEx(lockName, lockInfo);
+				if(false == lockSyncSource("DocIndexLib", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+				{
+					return false;
+				}
 					
-					try {
-						directory = FSDirectory.open(new File(indexLib));
+				try {
+					directory = FSDirectory.open(new File(indexLib));
+				
+			        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, null);
+			        indexWriter = new IndexWriter(directory, config);
+			        
+			        String docPath = doc.getPath() + doc.getName() + "/";
+			        Term term = new Term("path", docPath + "*");
+			        Query query = new WildcardQuery(term);
+			        //Query query = new PrefixQuery(new Term("path", docPath));
+			        
+			        indexWriter.deleteDocuments(query);
+			        indexWriter.commit();
+		
+			        indexWriter.close();
+			        indexWriter = null;
+			        directory.close();
+			        directory = null;
+			        
+				} catch (Exception e) {
+					Log.info("deleteIndexEx() 异常");
+					Log.debug(e);
+				} finally {
+					closeResource(indexWriter, directory, analyzer);
+				}
 					
-				        IndexWriterConfig config = new IndexWriterConfig(Version.LUCENE_46, null);
-				        indexWriter = new IndexWriter(directory, config);
-				        
-				        String docPath = doc.getPath() + doc.getName() + "/";
-				        Term term = new Term("path", docPath + "*");
-				        Query query = new WildcardQuery(term);
-				        //Query query = new PrefixQuery(new Term("path", docPath));
-				        
-				        indexWriter.deleteDocuments(query);
-				        indexWriter.commit();
-			
-				        indexWriter.close();
-				        indexWriter = null;
-				        directory.close();
-				        directory = null;
-				        
-					} catch (Exception e) {
-						Log.info("deleteIndexEx() 异常");
-						Log.debug(e);
-					} finally {
-						closeResource(indexWriter, directory, analyzer);
-					}
-					
-					redisSyncUnlockEx(lockName, lockInfo, synclock);
-		    	}
+				unlockSyncSource(lockName, systemUser);
 	    	}
     	}
     	
@@ -2120,15 +2120,14 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 addCommitLogIndex synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitLog", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+		{
+			return false;
+		}
+		
+		ret = addCommitLogIndexBasic(commit, indexLib);
 			
-    		ret = addCommitLogIndexBasic(commit, indexLib);
-			
-    		redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
-
+		unlockSyncSource(lockName, systemUser);
     	return ret;
     }
 	
@@ -2143,16 +2142,15 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 updateCommitLogIndex synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitLog", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+		{
+			return false;
+		}
 			
-    		deleteCommitLogIndexBasic(commit.id, indexLib);
-        	ret = addCommitLogIndexBasic(commit, indexLib);
+    	deleteCommitLogIndexBasic(commit.id, indexLib);
+        ret = addCommitLogIndexBasic(commit, indexLib);
 			
-    		redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
-
+		unlockSyncSource(lockName, systemUser);
     	return ret;
     }
 	
@@ -2167,15 +2165,14 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 deleteCommitLogIndex synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitLog", lockName, lockInfo, 2*60*1000, synclock, 3*1000, 3, systemUser))
+		{
+			return false;
+		}
+		
+		ret = deleteCommitLogIndexBasic(commit.id, indexLib);
 			
-    		ret = deleteCommitLogIndexBasic(commit.id, indexLib);
-    		
-    		redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
-
+		unlockSyncSource(lockName, systemUser);
     	return ret;
     }
 	
@@ -2190,15 +2187,14 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 deleteIndexForCommitEntry synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitEntry", lockName, lockInfo, 10*60*1000, synclock, 3*1000, 10, systemUser))
+		{
+			return false;
+		}
     	
-    		ret = deleteIndexForCommitEntryBasic(entry.id, indexLib);
+    	ret = deleteIndexForCommitEntryBasic(entry.id, indexLib);
 			
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
-		
+    	unlockSyncSource(lockName, systemUser);
 		return ret;
     }
 	
@@ -2213,15 +2209,14 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 addIndexForCommitEntry synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitEntry", lockName, lockInfo, 10*60*1000, synclock, 3*1000, 10, systemUser))
+		{
+			return false;
+		}
     	
-    		ret = addIndexForCommitEntryBasic(entry, indexLib);
+    	ret = addIndexForCommitEntryBasic(entry, indexLib);
 			
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
-		
+    	unlockSyncSource(lockName, systemUser);
 		return ret;
     }
 	
@@ -2236,39 +2231,39 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 addIndexForCommitEntries synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitEntry", lockName, lockInfo, 10*60*1000, synclock, 3*1000, 10, systemUser))
+		{
+			return false;
+		}
     		
-    		//使用共用的commitEntry来减少内存的占用
-    		CommitEntry commitEntry = new CommitEntry();
-			commitEntry.startTime = action.startTime;
-			commitEntry.userId = action.user.getId();
-			commitEntry.userName = action.user.getName();
-			commitEntry.commitId = action.commitId;
-			commitEntry.commitMsg = action.commitMsg;
-			commitEntry.commitUsers = action.commitUser;
-			commitEntry.commitAction = action.event;
-			commitEntry.reposId = repos.getId();
-			commitEntry.reposName = repos.getName();
-			
-    		for(CommitEntry entry: commitEntryList)
-    		{
-    			commitEntry.realCommitAction = entry.realCommitAction;
-    			commitEntry.docId = entry.docId;
-    			commitEntry.path = entry.path;
-    			commitEntry.name = entry.name;
-    			commitEntry.entryType = entry.entryType;
-    			commitEntry.size = entry.size;
-    			commitEntry.latestEditTime = entry.latestEditTime;
-    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-    			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    		}
-    		
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
+		//使用共用的commitEntry来减少内存的占用
+		CommitEntry commitEntry = new CommitEntry();
+		commitEntry.startTime = action.startTime;
+		commitEntry.userId = action.user.getId();
+		commitEntry.userName = action.user.getName();
+		commitEntry.commitId = action.commitId;
+		commitEntry.commitMsg = action.commitMsg;
+		commitEntry.commitUsers = action.commitUser;
+		commitEntry.commitAction = action.event;
+		commitEntry.reposId = repos.getId();
+		commitEntry.reposName = repos.getName();
 		
-		ret = true;
+		for(CommitEntry entry: commitEntryList)
+		{
+			commitEntry.realCommitAction = entry.realCommitAction;
+			commitEntry.docId = entry.docId;
+			commitEntry.path = entry.path;
+			commitEntry.name = entry.name;
+			commitEntry.entryType = entry.entryType;
+			commitEntry.size = entry.size;
+			commitEntry.latestEditTime = entry.latestEditTime;
+			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+			addIndexForCommitEntryBasic(commitEntry, indexLib);
+		}
+    		
+        unlockSyncSource(lockName, systemUser);
+		
+        ret = true;
 		return ret;
 	}
 	
@@ -2284,38 +2279,38 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 addIndexForCommitEntries synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitEntry", lockName, lockInfo, 10*60*1000, synclock, 3*1000, 10, systemUser))
+		{
+			return false;
+		}
     	
-    		//使用共用的commitEntry来减少内存的占用
-    		CommitEntry commitEntry = new CommitEntry();
-			commitEntry.startTime = context.startTime;
-			commitEntry.userId = context.user.getId();
-			commitEntry.userName = context.user.getName();
-			commitEntry.commitId = context.commitId;
-			commitEntry.commitMsg = context.commitMsg;
-			commitEntry.commitUsers = context.commitUser;
-			commitEntry.commitAction = context.event;
-			commitEntry.reposId = repos.getId();
-			commitEntry.reposName = repos.getName();
-			
-    		for(CommitEntry entry: commitEntryList)
-    		{
-    			commitEntry.realCommitAction = entry.realCommitAction;
-    			commitEntry.docId = entry.docId;
-    			commitEntry.path = entry.path;
-    			commitEntry.name = entry.name;
-    			commitEntry.entryType = entry.entryType;
-    			commitEntry.size = entry.size;
-    			commitEntry.latestEditTime = entry.latestEditTime;
-    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-    			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    		}
-    		
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
+		//使用共用的commitEntry来减少内存的占用
+		CommitEntry commitEntry = new CommitEntry();
+		commitEntry.startTime = context.startTime;
+		commitEntry.userId = context.user.getId();
+		commitEntry.userName = context.user.getName();
+		commitEntry.commitId = context.commitId;
+		commitEntry.commitMsg = context.commitMsg;
+		commitEntry.commitUsers = context.commitUser;
+		commitEntry.commitAction = context.event;
+		commitEntry.reposId = repos.getId();
+		commitEntry.reposName = repos.getName();
 		
+		for(CommitEntry entry: commitEntryList)
+		{
+			commitEntry.realCommitAction = entry.realCommitAction;
+			commitEntry.docId = entry.docId;
+			commitEntry.path = entry.path;
+			commitEntry.name = entry.name;
+			commitEntry.entryType = entry.entryType;
+			commitEntry.size = entry.size;
+			commitEntry.latestEditTime = entry.latestEditTime;
+			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+			addIndexForCommitEntryBasic(commitEntry, indexLib);
+		}
+    		
+        unlockSyncSource(lockName, systemUser);
+        
 		ret = true;
 		return ret;
 	}
@@ -2330,9 +2325,10 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 addIndexForCommitEntries synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitEntry", lockName, lockInfo, 10*60*1000, synclock, 3*1000, 10, systemUser))
+		{
+			return false;
+		}
     	
     		//使用共用的commitEntry来减少内存的占用
     		CommitEntry commitEntry = new CommitEntry();
@@ -2352,9 +2348,7 @@ public class LuceneUtil2   extends BaseFunction
         			doc.getLevel(), doc.getLocalRootPath(), doc.getPath(), doc.getName(),
         			indexLib);
     				
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
-		
+		unlockSyncSource(lockName, systemUser);
 		ret = true;
 		return ret;
 	}
@@ -2408,155 +2402,154 @@ public class LuceneUtil2   extends BaseFunction
 		
 		String lockInfo = "LuceneUtil2 addIndexForCommitEntries synclock:" + indexLib;
 		String lockName = "indexLibSyncLock" + indexLib;
-		synchronized(synclock)
-    	{
-    		redisSyncLockEx(lockName, lockInfo);
+		if(false == lockSyncSource("CommitEntry", lockName, lockInfo, 10*60*1000, synclock, 3*1000, 10, systemUser))
+		{
+			return false;
+		}
     	
-    		//使用共用的commitEntry来减少内存的占用
-    		CommitEntry commitEntry = new CommitEntry();
-			commitEntry.startTime = context.startTime;
-			commitEntry.userId = context.user.getId();
-			commitEntry.userName = context.user.getName();
-			commitEntry.commitId = context.commitId;
-			commitEntry.commitMsg = context.commitMsg;
-			commitEntry.commitUsers = context.commitUser;
-			commitEntry.commitAction = context.event;
-			commitEntry.reposId = repos.getId();
-			commitEntry.reposName = repos.getName();
-			
-			Doc doc = null;
-			Doc newDoc = null;
-    		for(CommitAction entry: commitActionList)
-    		{    			
-    			switch(entry.getAction())
-    			{
-    			case ADD:
-        			doc = entry.getDoc(); 
-        			commitEntry.docId = doc.getDocId();
-        			commitEntry.path = doc.getPath();
-        			commitEntry.name = doc.getName();
-        			commitEntry.entryType = doc.getType();
-        			commitEntry.size = doc.getSize();
-        			commitEntry.latestEditTime = doc.getLatestEditTime();
-    				commitEntry.realCommitAction = "add";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				break;
-    			case DELETE:
-        			doc = entry.getDoc(); 
-        			commitEntry.docId = doc.getDocId();
-        			commitEntry.path = doc.getPath();
-        			commitEntry.name = doc.getName();
-        			commitEntry.entryType = doc.getType();
-        			commitEntry.size = doc.getSize();
-        			commitEntry.latestEditTime = doc.getLatestEditTime();
-    				commitEntry.realCommitAction = "delete";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				break;
-    			case MODIFY:
-        			doc = entry.getDoc(); 
-        			commitEntry.docId = doc.getDocId();
-        			commitEntry.path = doc.getPath();
-        			commitEntry.name = doc.getName();
-        			commitEntry.entryType = doc.getType();
-        			commitEntry.size = doc.getSize();
-        			commitEntry.latestEditTime = doc.getLatestEditTime();
-    				commitEntry.realCommitAction = "modify";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				break;
-    			case MOVE:
-        			doc = entry.getDoc(); 
-        			commitEntry.docId = doc.getDocId();
-        			commitEntry.path = doc.getPath();
-        			commitEntry.name = doc.getName();
-        			commitEntry.entryType = doc.getType();
-        			commitEntry.size = doc.getSize();
-        			commitEntry.latestEditTime = doc.getLatestEditTime();
-    				commitEntry.realCommitAction = "delete";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				//Add DstEntry
-        			newDoc = entry.getDoc(); 
-        			commitEntry.docId = newDoc.getDocId();
-        			commitEntry.path = newDoc.getPath();
-        			commitEntry.name = newDoc.getName();
-        			commitEntry.entryType = newDoc.getType();
-        			commitEntry.size = newDoc.getSize();
-        			commitEntry.latestEditTime = newDoc.getLatestEditTime();
-        			commitEntry.realCommitAction = "add";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-        			break;
-    			case COPY:
-        			doc = entry.getDoc(); 
-        			commitEntry.docId = doc.getDocId();
-        			commitEntry.path = doc.getPath();
-        			commitEntry.name = doc.getName();
-        			commitEntry.entryType = doc.getType();
-        			commitEntry.size = doc.getSize();
-        			commitEntry.latestEditTime = doc.getLatestEditTime();
-    				commitEntry.realCommitAction = "noChange";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				//Add DstEntry
-        			newDoc = entry.getDoc(); 
-        			commitEntry.docId = newDoc.getDocId();
-        			commitEntry.path = newDoc.getPath();
-        			commitEntry.name = newDoc.getName();
-        			commitEntry.entryType = newDoc.getType();
-        			commitEntry.size = newDoc.getSize();
-        			commitEntry.latestEditTime = newDoc.getLatestEditTime();
-        			commitEntry.realCommitAction = "add";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				break;
-    			case FILETODIR:
-        			doc = entry.getDoc(); 
-        			commitEntry.docId = doc.getDocId();
-        			commitEntry.path = doc.getPath();
-        			commitEntry.name = doc.getName();
-        			commitEntry.size = doc.getSize();
-        			commitEntry.latestEditTime = doc.getLatestEditTime();
-    				commitEntry.realCommitAction = "delete";
-    				commitEntry.entryType = 1; //File
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				//Add DstEntry
-        			commitEntry.entryType = 2; //Dir
-        			commitEntry.size = newDoc.getSize();
-        			commitEntry.latestEditTime = newDoc.getLatestEditTime();
-        			commitEntry.realCommitAction = "add";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				break;
-    			case DIRTOFILE:
-        			doc = entry.getDoc(); 
-        			commitEntry.docId = doc.getDocId();
-        			commitEntry.path = doc.getPath();
-        			commitEntry.name = doc.getName();
-        			commitEntry.entryType = doc.getType();
-    				commitEntry.realCommitAction = "delete";
-    				commitEntry.entryType = 2; //Dir
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				//Add DstEntry
-        			commitEntry.entryType = 1; //File
-        			commitEntry.size = newDoc.getSize();
-        			commitEntry.latestEditTime = newDoc.getLatestEditTime();
-        			commitEntry.realCommitAction = "add";
-        			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
-        			addIndexForCommitEntryBasic(commitEntry, indexLib);
-    				break;
-    			default:
-    				break;
-    			}
-    		}
-    		
-			redisSyncUnlockEx(lockName, lockInfo, synclock);
-    	}
+		//使用共用的commitEntry来减少内存的占用
+		CommitEntry commitEntry = new CommitEntry();
+		commitEntry.startTime = context.startTime;
+		commitEntry.userId = context.user.getId();
+		commitEntry.userName = context.user.getName();
+		commitEntry.commitId = context.commitId;
+		commitEntry.commitMsg = context.commitMsg;
+		commitEntry.commitUsers = context.commitUser;
+		commitEntry.commitAction = context.event;
+		commitEntry.reposId = repos.getId();
+		commitEntry.reposName = repos.getName();
 		
+		Doc doc = null;
+		Doc newDoc = null;
+		for(CommitAction entry: commitActionList)
+		{    			
+			switch(entry.getAction())
+			{
+			case ADD:
+    			doc = entry.getDoc(); 
+    			commitEntry.docId = doc.getDocId();
+    			commitEntry.path = doc.getPath();
+    			commitEntry.name = doc.getName();
+    			commitEntry.entryType = doc.getType();
+    			commitEntry.size = doc.getSize();
+    			commitEntry.latestEditTime = doc.getLatestEditTime();
+				commitEntry.realCommitAction = "add";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				break;
+			case DELETE:
+    			doc = entry.getDoc(); 
+    			commitEntry.docId = doc.getDocId();
+    			commitEntry.path = doc.getPath();
+    			commitEntry.name = doc.getName();
+    			commitEntry.entryType = doc.getType();
+    			commitEntry.size = doc.getSize();
+    			commitEntry.latestEditTime = doc.getLatestEditTime();
+				commitEntry.realCommitAction = "delete";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				break;
+			case MODIFY:
+    			doc = entry.getDoc(); 
+    			commitEntry.docId = doc.getDocId();
+    			commitEntry.path = doc.getPath();
+    			commitEntry.name = doc.getName();
+    			commitEntry.entryType = doc.getType();
+    			commitEntry.size = doc.getSize();
+    			commitEntry.latestEditTime = doc.getLatestEditTime();
+				commitEntry.realCommitAction = "modify";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				break;
+			case MOVE:
+    			doc = entry.getDoc(); 
+    			commitEntry.docId = doc.getDocId();
+    			commitEntry.path = doc.getPath();
+    			commitEntry.name = doc.getName();
+    			commitEntry.entryType = doc.getType();
+    			commitEntry.size = doc.getSize();
+    			commitEntry.latestEditTime = doc.getLatestEditTime();
+				commitEntry.realCommitAction = "delete";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				//Add DstEntry
+    			newDoc = entry.getDoc(); 
+    			commitEntry.docId = newDoc.getDocId();
+    			commitEntry.path = newDoc.getPath();
+    			commitEntry.name = newDoc.getName();
+    			commitEntry.entryType = newDoc.getType();
+    			commitEntry.size = newDoc.getSize();
+    			commitEntry.latestEditTime = newDoc.getLatestEditTime();
+    			commitEntry.realCommitAction = "add";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+    			break;
+			case COPY:
+    			doc = entry.getDoc(); 
+    			commitEntry.docId = doc.getDocId();
+    			commitEntry.path = doc.getPath();
+    			commitEntry.name = doc.getName();
+    			commitEntry.entryType = doc.getType();
+    			commitEntry.size = doc.getSize();
+    			commitEntry.latestEditTime = doc.getLatestEditTime();
+				commitEntry.realCommitAction = "noChange";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				//Add DstEntry
+    			newDoc = entry.getDoc(); 
+    			commitEntry.docId = newDoc.getDocId();
+    			commitEntry.path = newDoc.getPath();
+    			commitEntry.name = newDoc.getName();
+    			commitEntry.entryType = newDoc.getType();
+    			commitEntry.size = newDoc.getSize();
+    			commitEntry.latestEditTime = newDoc.getLatestEditTime();
+    			commitEntry.realCommitAction = "add";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				break;
+			case FILETODIR:
+    			doc = entry.getDoc(); 
+    			commitEntry.docId = doc.getDocId();
+    			commitEntry.path = doc.getPath();
+    			commitEntry.name = doc.getName();
+    			commitEntry.size = doc.getSize();
+    			commitEntry.latestEditTime = doc.getLatestEditTime();
+				commitEntry.realCommitAction = "delete";
+				commitEntry.entryType = 1; //File
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				//Add DstEntry
+    			commitEntry.entryType = 2; //Dir
+    			commitEntry.size = newDoc.getSize();
+    			commitEntry.latestEditTime = newDoc.getLatestEditTime();
+    			commitEntry.realCommitAction = "add";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				break;
+			case DIRTOFILE:
+    			doc = entry.getDoc(); 
+    			commitEntry.docId = doc.getDocId();
+    			commitEntry.path = doc.getPath();
+    			commitEntry.name = doc.getName();
+    			commitEntry.entryType = doc.getType();
+				commitEntry.realCommitAction = "delete";
+				commitEntry.entryType = 2; //Dir
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				//Add DstEntry
+    			commitEntry.entryType = 1; //File
+    			commitEntry.size = newDoc.getSize();
+    			commitEntry.latestEditTime = newDoc.getLatestEditTime();
+    			commitEntry.realCommitAction = "add";
+    			commitEntry.id = buildUniqueIdForCommitEntry(commitEntry);
+    			addIndexForCommitEntryBasic(commitEntry, indexLib);
+				break;
+			default:
+				break;
+			}
+		}
+    		
+    	unlockSyncSource(lockName, systemUser);
 		ret = true;
 		return ret;
 	}

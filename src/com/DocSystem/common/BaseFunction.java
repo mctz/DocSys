@@ -37,7 +37,6 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.NumericRangeQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Sort;
@@ -67,8 +66,6 @@ import com.DocSystem.common.entity.AuthCode;
 import com.DocSystem.common.entity.AutoTaskConfig;
 import com.DocSystem.common.entity.BackupConfig;
 import com.DocSystem.common.entity.BackupTask;
-import com.DocSystem.common.entity.CommitEntry;
-import com.DocSystem.common.entity.CommitLog;
 import com.DocSystem.common.entity.DownloadPrepareTask;
 import com.DocSystem.common.entity.EncryptConfig;
 import com.DocSystem.common.entity.FtpConfig;
@@ -105,6 +102,7 @@ import com.DocSystem.entity.OfficeEditLock;
 import com.DocSystem.entity.RemoteStorageLock;
 import com.DocSystem.entity.Repos;
 import com.DocSystem.entity.ReposExtConfigDigest;
+import com.DocSystem.entity.SyncSourceLock;
 import com.DocSystem.entity.User;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -199,7 +197,6 @@ public class BaseFunction{
     protected static User systemUser = new User();
     protected static User anyUser = new User();	//EveryOne
     
-
 	public static boolean redisEn = false;
 	public static String redisUrl = null;
 	public static RedissonClient redisClient = null;
@@ -235,6 +232,9 @@ public class BaseFunction{
 	//远程存储服务器锁HashMap
 	protected static ConcurrentHashMap<String, RemoteStorageLock> remoteStorageLocksMap = new ConcurrentHashMap<String, RemoteStorageLock>();
 
+	//同步资源同步锁HashMap
+	protected static ConcurrentHashMap<String, SyncSourceLock> syncSourceLocksMap = new ConcurrentHashMap<String, SyncSourceLock>();
+	
 	//Office协同编辑打开的文件[dockey , docPath]
 	public static ConcurrentHashMap<String, String> openedDocsMap = new ConcurrentHashMap<String, String>();
 
@@ -2166,87 +2166,229 @@ public class BaseFunction{
 		return true;
 	}
 	
-	//*** remoteStorageLocksMap ***
-	//unlockRemoteStorage not need to executed with synclock, because it already is thread safe 
-	protected boolean unlockRemoteStorage(RemoteStorageConfig remote, User accessUser, Doc doc) 
+	//*** remoteStorageLocksMap ***	
+	protected Object getRemoteStorageSyncLock(String remoteStorage) {
+		Object synclock = remoteStorageSyncLockHashMap.get(remoteStorage);
+    	if(synclock == null)
+    	{
+    		Log.debug("getRemoteStorageSyncLock() synclock for " + remoteStorage + " is null, do create");
+    		synclock = new Object();
+    		remoteStorageSyncLockHashMap.put(remoteStorage, synclock);
+    	}
+    	return synclock;
+	}
+    
+	//*** syncSourceLocksMap ***
+	public static boolean lockSyncSource(
+			String sourceName, String lockName, String lockInfo,
+			long lockDuration, 	//锁定时长(超过该时长将自动解锁)
+			Object synclock, 	//线程锁对象
+			int retryCount, int retrySleepTime, //同步锁获取失败的重试次数与重试睡眠时间（如果重试次数设置为0表示取锁失败直接返回）
+			User accessUser)
 	{
-		Log.debug("unlockRemoteStorage() remoteStorageLock [" + remote.remoteStorageIndexLib + "] Start for [" + doc.getPath() + doc.getName() + "]");
-		RemoteStorageLock curLock = getRemoteStorageLock(remote.remoteStorageIndexLib);
+		SyncSourceLock lock = tryLockSyncSource(sourceName, lockName, lockInfo, lockDuration, synclock, retryCount, retrySleepTime, accessUser);
+		if(lock != null)
+		{
+			//Log.info("lockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] lock success for [" + doc.getPath() + doc.getName() + "]");
+			return true;
+		}
+		
+		return false;
+	}
+	
+	private static SyncSourceLock tryLockSyncSource(String sourceName, String lockName, String lockInfo, 
+			long lockDuration, Object synclock, int retryCount, int retrySleepTime, 
+			User accessUser) 
+	{
+		//Log.debug("tryLockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] Start");
+
+		SyncSourceLock newLock = null;
+		SyncSourceLock curLock = null;
+		
+		int count = 0;
+		for(;;)
+		{
+			synchronized(synclock)
+			{
+				redisSyncLockEx(lockName ,lockInfo);
+				
+				curLock = getSyncSourceLock(lockName);
+				if(curLock == null)
+				{
+					//Log.debug("tryLockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] not locked");
+					curLock = new SyncSourceLock();
+					curLock.state = 1;
+					curLock.sourceName = sourceName;
+					curLock.name = lockName;
+					curLock.lockBy = accessUser.getId();
+					curLock.locker = accessUser.getName();
+					curLock.createTime = new Date().getTime();
+					curLock.lockTime = curLock.createTime + lockDuration;
+					curLock.synclock = new SyncLock();
+					curLock.server = clusterServerUrl;
+					curLock.info = lockInfo;
+					addSyncSourceLock(lockName, curLock);
+				
+					newLock = curLock;
+				}
+				else
+				{
+					//check if it is locked
+					if(curLock.state == 0)
+					{
+						//Log.debug("tryLockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] not locked");
+						curLock.state = 1;
+						curLock.lockBy = accessUser.getId();
+						curLock.locker = accessUser.getName();
+						curLock.createTime = new Date().getTime();
+						curLock.lockTime = curLock.createTime + lockDuration;
+						curLock.server = clusterServerUrl;
+						curLock.info = lockInfo;
+
+						newLock = curLock;
+						
+						updateSyncSourceLock(lockName, curLock);
+					}
+					else
+					{
+						long curTime = new Date().getTime();
+						if(curLock.lockTime < curTime)
+						{
+							Log.info("tryLockSyncSource() syncSourceLock [" + curLock.name + "] of [" + curLock.sourceName + "] is expired");
+							curLock.state = 1;
+							curLock.lockBy = accessUser.getId();
+							curLock.locker = accessUser.getName();
+							curLock.createTime = new Date().getTime();
+							curLock.lockTime = curLock.createTime + lockDuration;
+							curLock.server = clusterServerUrl;
+							curLock.info = lockInfo;
+							
+							newLock = curLock;
+							updateSyncSourceLock(lockName, curLock);
+						}
+						else
+						{
+							String timeStamp = DateFormat.dateTimeFormat(new Date(curLock.createTime));
+							String detail = "[" + timeStamp + "] " + curLock.info + "]";
+							Log.debug("tryLockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] state:" + curLock.state + " 详情: " + detail);
+							long lockedTime = curTime - curLock.createTime;
+							long leftTime = curLock.lockTime - curTime;
+							Log.debug( "[" + lockName + "] of [" + sourceName + "]已被 [" + curLock.locker + "] 锁定了 " + lockedTime  + " ms, 将于 " + leftTime + " ms 后自动解锁\n");
+						}
+					}
+				}
+				
+				redisSyncUnlockEx(lockName, lockInfo, synclock);
+			}
+		
+			if(newLock != null) 
+			{
+				Log.info("tryLockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] Lock success");	
+				return newLock;
+			}
+			
+			//wait for wake up or timeout
+			count++;
+			if(count >= retryCount)
+			{
+				Log.info("tryLockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] lock failed with max retries:" + retryCount);
+				break;
+			}
+			
+			Log.info("tryLockSyncSource() syncSourceLock [" + lockName + "] of [" + sourceName + "] lock failed " + count + " times, sleep " + retrySleepTime + " ms and try again");
+			
+			synchronized(curLock.synclock)
+			{
+				try {
+					curLock.synclock.wait(retrySleepTime);
+				} catch (InterruptedException e) {
+					errorLog(e);
+				}
+			}
+		}
+		return null;
+	}
+
+	//unlockSyncSource need not to be executed with synclock, because it is already in thread safe 
+	protected static boolean unlockSyncSource(String lockName, User accessUser)
+	{
+		Log.debug("unlockSyncSource() syncSourceLock [" + lockName + "] Start");
+		SyncSourceLock curLock = getSyncSourceLock(lockName);
 		if(curLock == null)
 		{
-			Log.debug("unlockRemoteStorage() remoteStorageLock [" + remote.remoteStorageIndexLib + "] was not locked");
+			Log.debug("unlockSyncSource() syncSourceLock [" + lockName + "] was not locked");
 			return true;
 		}
 		
 		if(curLock.lockBy == null || curLock.lockBy.equals(accessUser.getId()))
 		{
 			curLock.state = 0;
-			updateRemoteStorageLock(remote.remoteStorageIndexLib, curLock);
+			updateSyncSourceLock(lockName, curLock);
 			
 			//wakeup all pendding thread for this lock
-			Log.info("unlockRemoteStorage() remoteStorageLock [" + curLock.name + "] for [" + doc.getPath() + doc.getName() + "], wakeup all sleep threads");
+			Log.info("unlockSyncSource() syncSourceLock [" + curLock.name + "] of [" + curLock.sourceName + "], wakeup all sleep threads");
 			synchronized(curLock.synclock)
 			{
 				curLock.synclock.notifyAll();
 			}
-			Log.debug("unlockRemoteStorage() remoteStorageLock [" + curLock.name + "] unlock success for [" + doc.getPath() + doc.getName() + "]");
+			Log.debug("unlockSyncSource() syncSourceLock [" + curLock.name + "] of [" + curLock.sourceName + "] unlock Success");
 			return true;
 		}
 		
-		Log.info("unlockRemoteStorage() remoteStorageLock [" + curLock.name + "] unlock failed " + " for [" + doc.getPath() + doc.getName() + "] (lockBy:" + curLock.lockBy + " unlock user:" + accessUser.getId());
+		Log.info("unlockSyncSource() syncSourceLock [" + curLock.name + "] of [" + curLock.sourceName + "] unlock failed (lockBy:" + curLock.lockBy + " unlock user:" + accessUser.getId());
 		return false;
 	}
 
-	protected void addRemoteStorageLock(String remoteStorageName, RemoteStorageLock remoteStorageLock) {
+	protected static void addSyncSourceLock(String lockName, SyncSourceLock lock) {
 		if(redisEn)
 		{
-			addRemoteStorageLockRedis(remoteStorageName, remoteStorageLock);
+			addSyncSourceLockRedis(lockName, lock);
 		}
 		else
 		{
-			addRemoteStorageLockLocal(remoteStorageName, remoteStorageLock);
+			addSyncSourceLockLocal(lockName, lock);
 		}
 	}
 	
-	private void addRemoteStorageLockLocal(String remoteStorageName, RemoteStorageLock remoteStorageLock) {
-		remoteStorageLocksMap.put(remoteStorageName, remoteStorageLock);
+	private static void addSyncSourceLockLocal(String lockName, SyncSourceLock lock) {
+		syncSourceLocksMap.put(lockName, lock);
 	}
 	
-	private void addRemoteStorageLockRedis(String remoteStorageName, RemoteStorageLock remoteStorageLock) {
-		RMap<Object, Object>  remoteStorageLocksMap = redisClient.getMap("remoteStorageLocksMap");
-		remoteStorageLocksMap.put(remoteStorageName, remoteStorageLock);
+	private static void addSyncSourceLockRedis(String lockName, SyncSourceLock lock) {
+		RMap<Object, Object>  syncSourceLocksMap = redisClient.getMap("syncSourceLocksMap");
+		syncSourceLocksMap.put(lockName, lock);
 	}
 
-	protected void updateRemoteStorageLock(String remoteStorageName, RemoteStorageLock remoteStorageLock) {
+	protected static void updateSyncSourceLock(String lockName, SyncSourceLock lock) {
 		if(redisEn)
 		{
-			updateRemoteStorageLockRedis(remoteStorageName, remoteStorageLock);
+			updateSyncSourceLockRedis(lockName, lock);
 		}
 	}
 
-	private void updateRemoteStorageLockRedis(String remoteStorageName, RemoteStorageLock remoteStorageLock) {
-		RMap<Object, Object>  remoteStorageLocksMap = redisClient.getMap("remoteStorageLocksMap");
-		remoteStorageLocksMap.put(remoteStorageName, remoteStorageLock);
+	private static void updateSyncSourceLockRedis(String lockName, SyncSourceLock lock) {
+		RMap<Object, Object>  syncSourceLocksMap = redisClient.getMap("syncSourceLocksMap");
+		syncSourceLocksMap.put(lockName, lock);
 	}
 	
-	protected RemoteStorageLock getRemoteStorageLock(String remoteStorageName) {
+	protected static SyncSourceLock getSyncSourceLock(String lockName) {
 		if(redisEn)
 		{
-			return getRemoteStorageLockRedis(remoteStorageName);
+			return getSyncSourceLockRedis(lockName);
 		}
 		
-		return getRemoteStorageLockLocal(remoteStorageName);
+		return getSyncSourceLockLocal(lockName);
 	}
 
-	private RemoteStorageLock getRemoteStorageLockLocal(String remoteStorageName) {
-		return remoteStorageLocksMap.get(remoteStorageName);
+	private static SyncSourceLock getSyncSourceLockLocal(String lockName) {
+		return syncSourceLocksMap.get(lockName);
 	}
 	
-	private RemoteStorageLock getRemoteStorageLockRedis(String remoteStorageName) {
-		RMap<Object, Object>  remoteStorageLocksMap = redisClient.getMap("remoteStorageLocksMap");
-		return (RemoteStorageLock) remoteStorageLocksMap.get(remoteStorageName);
+	private static SyncSourceLock getSyncSourceLockRedis(String lockName) {
+		RMap<Object, Object>  syncSourceLocksMap = redisClient.getMap("syncSourceLocksMap");
+		return (SyncSourceLock) syncSourceLocksMap.get(lockName);
 	}
-    
+	
 	private static void initSystemLicenseInfo() {
 		Log.debug("initSystemLicenseInfo() ");
 		//Default systemLicenseInfo
@@ -5500,14 +5642,14 @@ public class BaseFunction{
 		Date date1 = new Date();
 		String lockInfo = "addSystemLog() syncLockForSystemLog";
 		String lockName = "syncLockForSystemLog";
-		synchronized(syncLockForSystemLog)
+		if(false == lockSyncSource("SystemLog", lockName, lockInfo, 2*60*1000, syncLockForSystemLog, 3*1000, 3, systemUser))
 		{
-    		redisSyncLockEx(lockName, lockInfo);
-    		
-			ret = addSystemLogIndex(log, indexLib);
+			return false;
+		}    		
+		
+		ret = addSystemLogIndex(log, indexLib);
 
-			redisSyncUnlockEx(lockName, lockInfo, syncLockForSystemLog);
-		}
+		unlockSyncSource(lockName, systemUser);
 		
 		Date date2 = new Date();
         Log.debug("addSystemLog() 创建索引耗时：" + (date2.getTime() - date1.getTime()) + "ms\n");

@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
 import com.DocSystem.common.ActionContext;
 import com.DocSystem.common.Base64Util;
+import com.DocSystem.common.CovertVideoUtil;
 import com.DocSystem.common.EVENT;
 import com.DocSystem.common.FileUtil;
 import com.DocSystem.common.FolderUploadAction;
@@ -2658,6 +2659,188 @@ public class DocController extends BaseController{
 		}
 	}
 	
+	//视频文件获取接口: 可以通过convertType指定转换类型或者直接读取
+	@RequestMapping(value="/downloadVideo/{vid}/{path}/{name}/{targetPath}/{targetName}/{authCode}/{shareId}/{encryptEn}/{convertType}", method=RequestMethod.GET)
+	public void downloadVideo(@PathVariable("vid") Integer vid, @PathVariable("path") String path, @PathVariable("name") String name, @PathVariable("targetPath") String targetPath,@PathVariable("targetName") String targetName,
+			@PathVariable("authCode") String authCode, @PathVariable("shareId") Integer shareId, @PathVariable("encryptEn") Integer encryptEn,
+			 @PathVariable("convertType") Integer convertType,
+			String disposition,
+			HttpServletResponse response,HttpServletRequest request,HttpSession session) throws Exception
+	{
+		Log.infoHead("************** downloadVideo ****************");
+		Log.info("downloadVideo reposId:" + vid + " path:" + path + " name:" + name + " targetPath:" + targetPath + " targetName:" + targetName + " authCode:" + authCode + " shareId:" + shareId + " encryptEn:" + encryptEn 
+				+ " convertType:" + convertType + " disposition:" + disposition);
+		
+		ReturnAjax rt = new ReturnAjax();
+		
+		ReposAccess reposAccess = null;
+		//Convert authCode and shareId same with Non Rest Style request
+		if(authCode.equals("0"))
+		{
+			authCode = null;
+		}
+		if(shareId == 0)
+		{
+			shareId = null;
+		}
+	
+		if(authCode != null)
+		{
+			if(checkAuthCode(authCode, null, rt) == null)
+			{
+				//docSysErrorLog("无效授权码或授权码已过期！", rt);
+				//writeJson(rt, response);			
+				//return;
+				throw new Exception(rt.getMsgInfo());
+			}
+			//reposAccess = getAuthCode(authCode).getReposAccess();
+		}
+		else
+		{
+			reposAccess = checkAndGetAccessInfo(shareId, session, request, response, null, null, null, false, rt);
+			if(reposAccess == null)
+			{
+				docSysErrorLog("非法仓库访问！", rt);
+				//writeJson(rt, response);			
+				//return;
+				throw new Exception(rt.getMsgInfo());
+			}
+		}
+		
+		if(targetPath == null || targetName == null)
+		{
+			docSysErrorLog("目标路径不能为空！", rt);
+			//writeJson(rt, response);			
+			//return;
+			throw new Exception(rt.getMsgInfo());
+		}
+		
+		targetPath = new String(targetPath.getBytes("ISO8859-1"),"UTF-8");	
+		targetPath = Base64Util.base64Decode(targetPath);
+		if(targetPath == null)
+		{
+			docSysErrorLog("目标路径解码失败！", rt);
+			//writeJson(rt, response);			
+			//return;
+			throw new Exception(rt.getMsgInfo());
+		}
+	
+		targetName = new String(targetName.getBytes("ISO8859-1"),"UTF-8");	
+		targetName = Base64Util.base64Decode(targetName);
+		if(targetName == null)
+		{
+			docSysErrorLog("目标文件名解码失败！", rt);
+			//writeJson(rt, response);			
+			//return;
+			throw new Exception(rt.getMsgInfo());
+		}
+	
+		Log.info("downloadImg targetPath:" + targetPath + " targetName:" + targetName);		
+		
+		Repos repos = null;
+		if(vid != null)
+		{
+			repos = getReposEx(vid);
+		}
+		
+		//获取目标图片文件的信息
+		Doc targetDoc = getVideoDocInfoWithConvertType(repos, path, name, convertType);		
+		if(targetDoc != null)
+		{
+			sendFileToWebPage(targetDoc.getLocalRootPath(), targetDoc.getName(), rt,response, request, disposition);
+			return;
+		}
+		
+		//use legacy solution
+		if(encryptEn == null || encryptEn == 0 || vid == null)
+		{
+			sendTargetToWebPage(targetPath, targetName, targetPath, rt, response, request,false, disposition);			
+		}
+		else
+		{
+			sendTargetToWebPageEx(repos, targetPath, targetName, rt, response, request, null, disposition);						
+		}
+	}
+	
+	private Doc getVideoDocInfoWithConvertType(Repos repos, String path, String name, Integer convertType) 
+	{
+		if(repos == null || convertType == null || path == null || name == null)
+		{
+			return null;
+		}
+		
+		if(repos.encryptType != null && repos.encryptType != 0)
+		{
+			//加密的仓库不支持视频转换方式
+			return null;
+		}
+		
+		try {	
+			path = new String(path.getBytes("ISO8859-1"),"UTF-8");	
+			path = Base64Util.base64Decode(path);
+			if(path == null)
+			{
+				return null;
+			}
+
+			name = new String(name.getBytes("ISO8859-1"),"UTF-8");
+			name = Base64Util.base64Decode(name);
+			if(name == null)
+			{
+				return null;
+			}
+			
+			String imgPreviewPath = Path.getReposTmpPathForVideoPreview(repos, path, name);
+			String localRootPath = Path.getReposRealPath(repos);
+			
+			return generateVideoWithConvertType(localRootPath + path, name, imgPreviewPath, convertType);			
+		} catch (UnsupportedEncodingException e) {
+			e.printStackTrace();
+			return null;
+		}
+	}
+
+	private Doc generateVideoWithConvertType(String localFilePath, String name, String imgPreviewPath, Integer convertType) 
+	{
+		Doc targetDoc = new Doc();
+		targetDoc.setLocalRootPath(imgPreviewPath);
+		targetDoc.setName(convertType + "_" + name);
+		if(FileUtil.isFileExist(imgPreviewPath + convertType + "_" + name) == true)
+		{
+			return targetDoc;
+		}
+		
+		switch(convertType)
+		{
+		case 1:	//Convert to mp4
+			String fileSuffix = FileUtil.getFileSuffix(name);
+			if(fileSuffix == null || fileSuffix.isEmpty())
+			{
+				return null;
+			}
+			if(fileSuffix.equals("mp4") || fileSuffix.equals("mov"))
+			{
+				FileUtil.copyFile(localFilePath + name, imgPreviewPath + convertType + "_" + name, false);
+			}
+			else
+			{
+				if(CovertVideoUtil.convertVideoToMp4(localFilePath + name, imgPreviewPath + convertType + "_" + name) == false)
+				{
+					return null;
+				}			
+			}
+			break;
+		default:
+			return null;
+		}
+		
+		if(FileUtil.isFileExist(imgPreviewPath + convertType + "_" + name) == true)
+		{
+			return targetDoc;
+		}
+		
+		return null;
+	}
 	//图片文件获取接口: 可以通过resolutionLevel指定分辨率等级
 	@RequestMapping(value="/downloadImg/{vid}/{path}/{name}/{targetPath}/{targetName}/{authCode}/{shareId}/{encryptEn}/{resolutionLevel}", method=RequestMethod.GET)
 	public void downloadImg(@PathVariable("vid") Integer vid, @PathVariable("path") String path, @PathVariable("name") String name, @PathVariable("targetPath") String targetPath,@PathVariable("targetName") String targetName,
@@ -4074,6 +4257,8 @@ public class DocController extends BaseController{
 		checkAndExtractEntryFromCompressDoc(repos, tempRootDoc, tmpDoc);
 		
 		String authCode = addDocDownloadAuthCode(reposAccess, null);
+		
+		//TODO: 如果是视频文件，用于preview的情况下，需要进行转码，因此fileLink可能不是指向原始文件的，前端需要告知视频转换类型
 		String fileLink = buildDownloadDocLink(tmpDoc, authCode, urlStyle, 0, rt);
 		if(fileLink == null)
 		{
@@ -4091,6 +4276,7 @@ public class DocController extends BaseController{
 			Integer shareId,
 			String urlStyle,
 			Integer forPreview,
+			Integer videoConvertType,
 			HttpSession session,HttpServletRequest request,HttpServletResponse response)
 	{
 		Log.infoHead("*************** getDocFileLink [" + path + name + "] ********************");		
@@ -4130,7 +4316,11 @@ public class DocController extends BaseController{
 		Doc doc = buildBasicDoc(reposId, null, null, reposPath, path, name, null, null, true, localRootPath, localVRootPath, null, null);
 		
 		//如果是用于预览目的则不需要进行下载权限检查
-		if(forPreview == null || forPreview != 1)
+		if(forPreview == null)
+		{
+			forPreview = 0;
+		}
+		if(forPreview != 1)
 		{
 			//检查用户是否有权限下载文件
 			if(checkUserDownloadRight(repos, reposAccess.getAccessUser().getId(), doc, reposAccess.getAuthMask(), rt) == false)
@@ -4217,6 +4407,16 @@ public class DocController extends BaseController{
 		}
 		
 		String authCode = addDocDownloadAuthCode(reposAccess, null);
+
+		//TODO: 如果是视频文件，用于preview的情况下，需要进行转码，因此fileLink可能不是指向原始文件的，前端需要告知视频转换类型，否则默认就是mp4
+		if(forPreview == 1)
+		{
+			if(videoConvertType != null && videoConvertType == 1)
+			{
+				tmpDoc = convertVideoToMP4(repos, tmpDoc);
+			}
+		}
+		
 		String fileLink = buildDownloadDocLink(tmpDoc, authCode, urlStyle, 1, rt);
 		if(fileLink == null)
 		{
@@ -4230,6 +4430,22 @@ public class DocController extends BaseController{
 		writeJson(rt, response);
 	}
 	
+	private Doc convertVideoToMP4(Repos repos, Doc doc) 
+	{
+		//TODO: 视频预览文件统一放到指定路径下
+		String imgPreviewPath = Path.getReposTmpPathForVideoPreview(repos, doc.getPath(), doc.getName());
+		Doc newDoc = generateVideoWithConvertType(doc.getLocalRootPath() + doc.getPath(), doc.getName(), imgPreviewPath, 1);
+		if(newDoc == null)
+		{
+			return doc;
+		}
+		
+		doc.setLocalRootPath(newDoc.getLocalRootPath());
+		doc.setPath("");
+		doc.setName(newDoc.getName());
+		return doc;
+	}
+
 	@RequestMapping("/getDocFileLinkRS.do")
 	public void getDocFileLink(Integer reposId, String path, String name, 
 			String commitId, Integer needDeletedEntry, Integer historyType,

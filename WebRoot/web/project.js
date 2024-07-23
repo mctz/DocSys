@@ -1632,7 +1632,18 @@ function showVideoPreview(showFlag)
 		return;
 	}
 	docDataEx.shareId = gShareId;
-	var docLink = getDocDownloadLink(gDocInfo);
+	
+	//TODO: 1表示需要转成mp4,如果是mp4或mov则只是拷贝到预览区(可以避免视频在预览的情况下无法删除或移动)
+	var docLink = docLink = getDocVideoPreviewLink(gDocInfo, 1, "REST"); 
+//	if(	gDocInfo.fileSuffix == "MOV" || gDocInfo.fileSuffix == "mov" || 
+//		gDocInfo.fileSuffix == "MP4" || gDocInfo.fileSuffix == "mp4")
+//	{
+//		docLink = getDocDownloadLink(gDocInfo);
+//	}
+//	else	//如果不是mov和mp4格式的则需要进行格式转换
+//	{
+//		docLink = getDocVideoPreviewLink(gDocInfo, 1, "REST"); //1表示需要转成mp4
+//	}
 	//docLink = "/DocSystem/web/static/video-js/oceans.mp4";
 	if(docLink == null)
 	{
@@ -1647,7 +1658,8 @@ function showVideoPreview(showFlag)
 		$("#videoPreview").attr('src', docLink);
 		//$("#videoPreview").attr('poster', docLink);
 		$("#videoPreview").show();
-		var type = getVideoTypeByFileSuffix(gDocInfo.fileSuffix);
+		//var type = getVideoTypeByFileSuffix(gDocInfo.fileSuffix);
+		var type = "video/mp4"; //We always need to covert to mp4
 		previewVideoWithVideojs('videoPreview', docLink, type);
 	}
 }

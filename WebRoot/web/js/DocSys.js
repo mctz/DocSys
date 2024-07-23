@@ -272,6 +272,9 @@ function getDocFileLink(docInfo, successCallback, errorCallback, urlStyle)
 
 function getDocFileLinkForPreview(docInfo, successCallback, errorCallback, urlStyle)
 {
+	//set videoConvertType
+	docInfo.videoConvertType = getVideoConvert(docInfo.fileSuffix);
+	
 	if(docInfo.isZip && docInfo.isZip == 1)
 	{
 		getZipDocFileLink(docInfo, successCallback, errorCallback, urlStyle, 1);
@@ -313,6 +316,7 @@ function getDocFileLinkBasic(docInfo, successCallback, errorCallback, urlStyle, 
             shareId: docInfo.shareId,
             urlStyle: urlStyle,
             forPreview: forPreview,
+            videoConvertType: docInfo.videoConvertType,
         },
         success : function (ret) {
         	console.log("getDocFileLinkBasic ret",ret);
@@ -369,6 +373,7 @@ function getZipDocFileLink(docInfo, successCallback, errorCallback, urlStyle, fo
             shareId: docInfo.shareId,
             urlStyle: urlStyle,
             forPreview: forPreview,
+            videoConvertType: docInfo.videoConvertType,
         },
         success : function (ret) {
         	console.log("getZipDocFileLink ret",ret);
@@ -860,6 +865,76 @@ function buildDocImagePreviewLink(downloadDocInfo, resolutionLevel, urlStyle)
 	return docLink;
 }
 
+function buildDocVideoPreviewLink(downloadDocInfo, convertType, urlStyle)
+{	
+	console.log("buildDocVideoPreviewLink downloadDocInfo:", downloadDocInfo);
+	var name = encodeURI(downloadDocInfo.name);
+   	var path = encodeURI(downloadDocInfo.path);
+   	var targetName = encodeURI(downloadDocInfo.targetName);
+   	var targetPath = encodeURI(downloadDocInfo.targetPath);
+   	
+   	if(urlStyle && urlStyle == "REST")
+   	{
+   		var docRestLink =  "/DocSystem/Doc/downloadVideo/" + downloadDocInfo.vid + "/" + path + "/" + name + "/" +targetPath+ "/"+targetName;
+   		if(downloadDocInfo.authCode)
+   		{
+   			docRestLink += "/" + downloadDocInfo.authCode;
+   		}
+   		else
+   		{
+   			docRestLink += "/0";
+   		}
+   		if(downloadDocInfo.shareId)
+   		{
+   			docRestLink +=  "/"  + downloadDocInfo.shareId;
+   		}
+   		else
+   		{
+   			docRestLink += "/0";
+   		}
+   		if(downloadDocInfo.encryptEn)
+   		{
+   			docRestLink +=  "/"  + downloadDocInfo.encryptEn;
+   		}
+   		else
+   		{
+   			docRestLink += "/0";   			
+   		}
+   		if(convertType)
+   		{
+   			docRestLink +=  "/"  + convertType;
+   		}
+   		else
+   		{
+   			docRestLink += "/0"; 
+   		}
+   		return docRestLink;
+   	}
+   	
+	var docLink = "/DocSystem/Doc/downloadDoc.do?vid=" + downloadDocInfo.vid + "&path=" + path + "&name=" + name + "&targetPath=" + targetPath + "&targetName=" + targetName;
+	if(downloadDocInfo.authCode)
+   	{
+		docLink += "&authCode=" + downloadDocInfo.authCode;
+   	}
+	if(downloadDocInfo.shareId)
+	{
+		docLink += "&shareId="+downloadDocInfo.shareId;
+	}
+	if(downloadDocInfo.deleteFlag)
+	{
+		docLink += "&deleteFlag="+ downloadDocInfo.deleteFlag;	
+	}
+	if(downloadDocInfo.encryptEn)
+	{
+		docLink += "&encryptEn="+ downloadDocInfo.encryptEn;	
+	}
+	if(convertType)
+	{
+		docLink += "&convertType="+ convertType;	
+	}	
+	return docLink;
+}
+
 function getDocImagePreviewLink(docInfo, resolutionLevel, urlStyle)
 {
 	var docDataEx = docInfo.dataEx;
@@ -870,6 +945,18 @@ function getDocImagePreviewLink(docInfo, resolutionLevel, urlStyle)
 	
 	docDataEx.vid = docInfo.vid;
 	return buildDocImagePreviewLink(docDataEx, resolutionLevel, urlStyle);
+}
+
+function getDocVideoPreviewLink(docInfo, convertType, urlStyle)
+{
+	var docDataEx = docInfo.dataEx;
+	if(!docDataEx || docDataEx == null)	//表明不是文件，无法预览
+	{
+		return null;
+	}
+	
+	docDataEx.vid = docInfo.vid;
+	return buildDocVideoPreviewLink(docDataEx, convertType, urlStyle);
 }
 
 //文件类型获取与判断接口
@@ -951,6 +1038,7 @@ function isPicture(suffix)
 			gif : true,
 			bmp : true,
 			mpg : true,
+			jfif : true,
 	};
 	
 	var type = fileTypeMap[suffix];
@@ -987,6 +1075,33 @@ function isVideo(suffix)
 	}
 	
 	return true;
+}
+
+function getVideoConvert(suffix)
+{
+	if(!suffix || suffix == "")
+	{
+		return 0;
+	}
+	var convertTypeMap = {
+			avi : 1,
+			mov : 0,
+			mpeg : 1,
+			mpg : 1,
+			mp4 : 0,
+			rmvb : 1,
+			asf : 1,
+			flv : 1,
+			ogg : 1,
+	};
+	
+	var type = convertTypeMap[suffix];
+	if ( undefined == type )
+	{
+		return 0;
+	}
+	
+	return type;
 }
 
 function isAudio(suffix)
@@ -1267,7 +1382,8 @@ function getDiyFileIconType(name)
 	        jpeg 	: 	"picture",
 			png 	: 	"picture",
 	    	gif 	: 	"picture",
-			mp3 	: 	"video",
+	    	jfif 	: 	"picture",
+	    	mp3 	: 	"video",
 			mp4 	: 	"video",
 			mpg 	: 	"video",
 			mkv 	: 	"video",
@@ -1786,7 +1902,9 @@ function showVideoWithDPlayer(objId, fileLink)
 }
 
 function getVideoTypeByFileSuffix(suffix)
-{
+{	
+	return "video/mp4";
+	
 	if(!suffix || suffix == "")
 	{
 		return "video/mp4";

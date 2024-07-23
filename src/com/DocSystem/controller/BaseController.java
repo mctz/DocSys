@@ -167,6 +167,7 @@ import com.DocSystem.entity.RemoteStorageLock;
 import com.DocSystem.entity.Repos;
 import com.DocSystem.entity.ReposAuth;
 import com.DocSystem.entity.Role;
+import com.DocSystem.entity.SyncSourceLock;
 import com.DocSystem.entity.SysConfig;
 import com.DocSystem.entity.User;
 import com.DocSystem.entity.UserGroup;
@@ -1183,8 +1184,8 @@ public class BaseController  extends BaseFunction{
 	//
 	protected List<Doc> getDocListFromRootToDoc(Repos repos, Doc doc, DocAuth rootDocAuth,  Doc rootDoc, HashMap<Long, DocAuth> docAuthHashMap, Integer listType, ReturnAjax rt)
 	{
+		//TODO: 注意这里获取的是rootDoc目录下的文件列表
 		//Log.debug("getDocListFromRootToDoc() reposId:" + repos.getId() + " parentPath:" + doc.getPath() +" docName:" + doc.getName());
-				
 		List<Doc> resultList = getAccessableSubDocList(repos, rootDoc, rootDocAuth, docAuthHashMap, listType, rt);	//get subDocList under root
 		if(resultList == null || resultList.size() == 0)
 		{
@@ -1216,7 +1217,6 @@ public class BaseController  extends BaseFunction{
 		}
 		int pLevel = rootDoc.getLevel();
 		DocAuth pDocAuth = rootDocAuth;
-		
 		for(int i=0; i<deepth; i++)
 		{
 			String name = paths[i];
@@ -1227,7 +1227,7 @@ public class BaseController  extends BaseFunction{
 			}	
 			
 			Doc tempDoc = buildBasicDoc(reposId, null, pid, doc.getReposPath(), pPath, name, pLevel+1, 2, true, doc.getLocalRootPath(), doc.getLocalVRootPath(), null, null);
-			DocAuth docAuth = getDocAuthFromHashMap(doc.getDocId(), pDocAuth, docAuthHashMap);
+			DocAuth docAuth = getDocAuthFromHashMap(tempDoc.getDocId(), pDocAuth, docAuthHashMap);
 			
 			List<Doc> subDocList = getAccessableSubDocList(repos, tempDoc, docAuth, docAuthHashMap, listType, rt);
 			if(subDocList == null || subDocList.size() == 0)
@@ -12558,21 +12558,24 @@ public class BaseController  extends BaseFunction{
 		String lockName = "reposData.syncLockForSvnCommit" + repos.getId();
 
 		Date date1 = new Date();
-		synchronized(reposData.syncLockForSvnCommit)
+
+		//TODO: 3分钟内取不到锁则放弃提交版本，表明资源已被长时间占用或异常
+		if(false == lockSyncSource("SvnCommit", lockName, lockInfo, 2*60*60*1000, reposData.syncLockForSvnCommit, 3*1000, 60, systemUser))
 		{
-			redisSyncLockEx(lockName, lockInfo);
-			
-			if(false == verReposUtil.Init(repos, isRealDoc, commitUser))
-			{
-				Log.debug("svnDocCommit() verReposInit Failed");
-			}
-			else
-			{
-				revision = verReposUtil.doAutoCommit(repos, doc, commitMsg,commitUser, localChangesRootPath, subDocCommitFlag, commitActionList, commitActionListFake);
-			}
-			
-			redisSyncUnlockEx(lockName, lockInfo, reposData.syncLockForSvnCommit);
+			return null;
 		}
+			
+		if(false == verReposUtil.Init(repos, isRealDoc, commitUser))
+		{
+			Log.debug("svnDocCommit() verReposInit Failed");
+		}
+		else
+		{
+			revision = verReposUtil.doAutoCommit(repos, doc, commitMsg,commitUser, localChangesRootPath, subDocCommitFlag, commitActionList, commitActionListFake);
+		}
+		
+		unlockSyncSource(lockName, systemUser);
+		
 		Date date2 = new Date();
 		Log.debug("版本提交耗时:" + (date2.getTime() - date1.getTime()) + "ms svnDocCommit() for [" +doc.getPath() + doc.getName()+ "] \n");
 
@@ -12593,28 +12596,31 @@ public class BaseController  extends BaseFunction{
 
 		String lockInfo = "gitDocCommit() reposData.syncLockForGitCommit";
 		String lockName = "reposData.syncLockForGitCommit" + repos.getId();
-		synchronized(reposData.syncLockForGitCommit)
+		
+		//TODO: 3分钟内取不到锁则放弃提交版本，表明资源已被长时间占用或异常
+		if(false == lockSyncSource("GitCommit", lockName, lockInfo, 2*60*60*1000, reposData.syncLockForGitCommit, 3*1000, 60, systemUser))
 		{
-			redisSyncLockEx(lockName, lockInfo);
+			return null;
+		}
 			
-			if(false == verReposUtil.Init(repos, isRealDoc, commitUser))
+		if(false == verReposUtil.Init(repos, isRealDoc, commitUser))
+		{
+			Log.debug("gitDocCommit() verReposInit Failed");
+		}
+		else
+		{
+			if(verReposUtil.checkAndClearnBranch(true) == false)
 			{
-				Log.debug("gitDocCommit() verReposInit Failed");
+				Log.debug("gitDocCommit() master branch is dirty and failed to clean");
 			}
 			else
 			{
-				if(verReposUtil.checkAndClearnBranch(true) == false)
-				{
-					Log.debug("gitDocCommit() master branch is dirty and failed to clean");
-				}
-				else
-				{
-					revision =  verReposUtil.doAutoCommit(repos, doc, commitMsg,commitUser, localChangesRootPath, subDocCommitFlag, commitActionList, commitActionListFake);
-				}
+				revision =  verReposUtil.doAutoCommit(repos, doc, commitMsg,commitUser, localChangesRootPath, subDocCommitFlag, commitActionList, commitActionListFake);
 			}
-			
-			redisSyncUnlockEx(lockName, lockInfo, reposData.syncLockForGitCommit);
 		}
+			
+		unlockSyncSource(lockName, systemUser);
+
 		Date date2 = new Date();
 		Log.debug("版本提交耗时:" + (date2.getTime() - date1.getTime()) + "ms gitDocCommit() for [" +doc.getPath() + doc.getName()+ "] \n");
 
@@ -14595,6 +14601,7 @@ public class BaseController  extends BaseFunction{
 		{
 			Log.debug("clearRedisCache() clusterServersMap is empty, do clean all redis data");
 			clearGlobalRedisData();
+			clearAllSyncSourceLocksMap(null);
 			clearAllRemoteStorageLocksMap(null);
 			clearAllReposRedisData(null);
 			clearAllOfficeRedisData(null);
@@ -14611,6 +14618,7 @@ public class BaseController  extends BaseFunction{
 			    {
 			    	String deleteServerUrl = deleteList.get(i);
 					Log.info("clearRedisCache() clear redis cache for clusterServer [" + deleteServerUrl + "]");
+					clearAllSyncSourceLocksMap(deleteServerUrl);
 					clearAllRemoteStorageLocksMap(deleteServerUrl);
 					clearAllReposRedisData(deleteServerUrl);
 					clearAllOfficeRedisData(deleteServerUrl);
@@ -14702,7 +14710,7 @@ public class BaseController  extends BaseFunction{
 	}
 
 	private void clearAllRemoteStorageLocksMap(String targetServerUrl) {
-		//遍历reposLocksMap, and unlock the locks locked by serverUrl
+		//遍历remoteStorageLocksMap, and unlock the locks locked by serverUrl
 		RMap<Object, Object> remoteStorageLocksMap = redisClient.getMap("remoteStorageLocksMap");
 		List<RemoteStorageLock> deleteList = new ArrayList<RemoteStorageLock>();
     	try {
@@ -14738,6 +14746,48 @@ public class BaseController  extends BaseFunction{
 	        	RemoteStorageLock remoteStorageLock = deleteList.get(i);
 	        	remoteStorageLocksMap.remove(remoteStorageLock.name);
 	        	//redisSyncUnlock("remoteStorageSyncLock" + remoteStorageLock.name, "clearAllRemoteStorageLocksMap()");
+	        }
+        } catch (Exception e) {
+            errorLog(e);
+        }
+	}
+	
+	private void clearAllSyncSourceLocksMap(String targetServerUrl) {
+		//遍历syncSourceLocksMap, and unlock the locks locked by serverUrl
+		RMap<Object, Object> syncSourceLocksMap = redisClient.getMap("syncSourceLocksMap");
+		List<SyncSourceLock> deleteList = new ArrayList<SyncSourceLock>();
+    	try {
+	        if (syncSourceLocksMap != null) {
+				Iterator<Entry<Object, Object>> iterator = syncSourceLocksMap.entrySet().iterator();
+		        while (iterator.hasNext()) 
+		        {
+		        	Entry<Object, Object> entry = iterator.next();
+		            if(entry != null)
+		        	{
+		            	SyncSourceLock lock = (SyncSourceLock) entry.getValue();
+		            	Integer curState = lock.state;
+	            		Log.debug("clearAllSyncSourceLocksMap() lock[" + lock.name + "] state:" + curState);
+		            	if(curState == 0)
+		            	{
+		            		deleteList.add(lock);
+		            	}
+		            	else
+		            	{
+		            		
+		            		if(targetServerUrl == null || lock.server == null || lock.server.equals(targetServerUrl))
+		            		{
+		            			deleteList.add(lock);
+		            		}
+		            	}
+		        	}
+		        }
+	        }	        
+	        
+	        //remove the remoteStorageLock
+	        for(int i=0; i<deleteList.size(); i++)
+	        {
+	        	SyncSourceLock remoteStorageLock = deleteList.get(i);
+	        	syncSourceLocksMap.remove(remoteStorageLock.name);
 	        }
         } catch (Exception e) {
             errorLog(e);
@@ -18076,10 +18126,20 @@ public class BaseController  extends BaseFunction{
 			Log.debug("DBUpgrade() 数据库备份失败!");
 			return true;
 		}
+		//Copy to defaultReposRootPath
+		String defaultReposRootPath  = Path.getDefaultReposRootPath(OSType);
+		
+		String curTimeStr = DateFormat.dateTimeFormat2(new Date());
+		FileUtil.copyFile(backUpPath + backUpName + ".sql", defaultReposRootPath + "DBBackup/" + curTimeStr + "/" + backUpName + ".sql", false);
 		
 		Integer newVersion = getVersionFromFile(docSysWebPath, "version");
 		Integer oldVersion = getVersionFromFile(docSysIniPath , "version");
-		return exportDatabaseAsJson(backupTabList, backUpPath, backUpName + ".json", oldVersion, newVersion, type, url, user, pwd);
+		boolean ret = exportDatabaseAsJson(backupTabList, backUpPath, backUpName + ".json", oldVersion, newVersion, type, url, user, pwd);
+		if(ret == true)
+		{
+			FileUtil.copyFile(backUpPath + backUpName + ".json", defaultReposRootPath + "DBBackup/"  + curTimeStr + "/" + backUpName + ".json", false);
+		}
+		return ret;
 	}
 
 	protected static boolean createDBTab(String tabName, String type, String url, String user, String pwd) {
